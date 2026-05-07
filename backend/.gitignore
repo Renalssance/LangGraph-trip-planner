@@ -28,7 +28,8 @@ ENV/
 
 # 环境变量
 .env
-.env.local
+.env.*
+!.env.example
 
 # IDE
 .vscode/
@@ -48,4 +49,3 @@ htmlcov/
 # 操作系统
 .DS_Store
 Thumbs.db
-
