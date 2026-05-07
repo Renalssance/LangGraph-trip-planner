@@ -93,3 +93,16 @@ export interface TripPlanResponse {
   data?: TripPlan
 }
 
+export type TripProgressEventType = 'progress' | 'complete' | 'error'
+export type TripProgressStatus = 'active' | 'done' | 'error'
+
+export interface TripProgressEvent {
+  event: TripProgressEventType
+  step: string
+  title: string
+  detail?: string
+  percent: number
+  status: TripProgressStatus
+  message?: string
+  data?: TripPlan
+}

@@ -196,6 +196,21 @@
             <p class="loading-status">
               {{ loadingStatus }}
             </p>
+            <div class="progress-feed">
+              <div
+                v-for="(item, index) in progressLogs"
+                :key="`${item.step}-${index}`"
+                class="progress-log-item"
+                :class="`progress-log-item-${item.status}`"
+              >
+                <span class="progress-log-dot"></span>
+                <div class="progress-log-content">
+                  <div class="progress-log-title">{{ item.title }}</div>
+                  <div class="progress-log-detail">{{ item.detail }}</div>
+                </div>
+                <span class="progress-log-percent">{{ item.percent }}%</span>
+              </div>
+            </div>
           </div>
         </a-form-item>
       </a-form>
@@ -207,18 +222,27 @@
 import { ref, reactive, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { generateTripPlan } from '@/services/api'
-import type { TripFormData } from '@/types'
+import { streamTripPlan } from '@/services/api'
+import type { TripFormData, TripProgressEvent, TripProgressStatus } from '@/types'
 import type { Dayjs } from 'dayjs'
 
 const router = useRouter()
 const loading = ref(false)
 const loadingProgress = ref(0)
 const loadingStatus = ref('')
+const progressLogs = ref<ProgressLogItem[]>([])
 
 type TripFormState = Omit<TripFormData, 'start_date' | 'end_date'> & {
   start_date: Dayjs | null
   end_date: Dayjs | null
+}
+
+interface ProgressLogItem {
+  step: string
+  title: string
+  detail: string
+  percent: number
+  status: TripProgressStatus
 }
 
 const formData = reactive<TripFormState>({
@@ -256,25 +280,8 @@ const handleSubmit = async () => {
 
   loading.value = true
   loadingProgress.value = 0
-  loadingStatus.value = '正在初始化...'
-
-  // 模拟进度更新
-  const progressInterval = setInterval(() => {
-    if (loadingProgress.value < 90) {
-      loadingProgress.value += 10
-
-      // 更新状态文本
-      if (loadingProgress.value <= 30) {
-        loadingStatus.value = '🔍 正在搜索景点...'
-      } else if (loadingProgress.value <= 50) {
-        loadingStatus.value = '🌤️ 正在查询天气...'
-      } else if (loadingProgress.value <= 70) {
-        loadingStatus.value = '🏨 正在推荐酒店...'
-      } else {
-        loadingStatus.value = '📋 正在生成行程计划...'
-      }
-    }
-  }, 500)
+  loadingStatus.value = '收到旅行规划请求...'
+  progressLogs.value = []
 
   try {
     const requestData: TripFormData = {
@@ -288,11 +295,9 @@ const handleSubmit = async () => {
       free_text_input: formData.free_text_input
     }
 
-    const response = await generateTripPlan(requestData)
-
-    clearInterval(progressInterval)
+    const response = await streamTripPlan(requestData, handleProgressEvent)
     loadingProgress.value = 100
-    loadingStatus.value = '✅ 完成!'
+    loadingStatus.value = '旅行计划生成完成'
 
     if (response.success && response.data) {
       // 保存到sessionStorage
@@ -308,14 +313,36 @@ const handleSubmit = async () => {
       message.error(response.message || '生成失败')
     }
   } catch (error: any) {
-    clearInterval(progressInterval)
+    loadingStatus.value = error.message || '生成旅行计划失败'
     message.error(error.message || '生成旅行计划失败,请稍后重试')
   } finally {
     setTimeout(() => {
       loading.value = false
       loadingProgress.value = 0
       loadingStatus.value = ''
+      progressLogs.value = []
     }, 1000)
+  }
+}
+
+const handleProgressEvent = (event: TripProgressEvent) => {
+  loadingProgress.value = Math.max(loadingProgress.value, event.percent)
+  loadingStatus.value = event.detail ? `${event.title} - ${event.detail}` : event.title
+
+  progressLogs.value = progressLogs.value.map((item) => (
+    item.status === 'active' ? { ...item, status: 'done' } : item
+  ))
+
+  progressLogs.value.push({
+    step: event.step,
+    title: event.title,
+    detail: event.detail || '',
+    percent: event.percent,
+    status: event.status
+  })
+
+  if (progressLogs.value.length > 12) {
+    progressLogs.value = progressLogs.value.slice(-12)
   }
 }
 </script>
@@ -626,6 +653,85 @@ const handleSubmit = async () => {
   color: #667eea;
   font-size: 18px;
   font-weight: 500;
+}
+
+.progress-feed {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+  text-align: left;
+}
+
+.progress-log-item {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 48px;
+  align-items: start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e8e8e8;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.progress-log-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #667eea;
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.12);
+}
+
+.progress-log-item-active .progress-log-dot {
+  animation: pulseDot 1.2s ease-in-out infinite;
+}
+
+.progress-log-item-done .progress-log-dot {
+  background: #52c41a;
+  box-shadow: 0 0 0 4px rgba(82, 196, 26, 0.12);
+}
+
+.progress-log-item-error .progress-log-dot {
+  background: #ff4d4f;
+  box-shadow: 0 0 0 4px rgba(255, 77, 79, 0.12);
+}
+
+.progress-log-content {
+  min-width: 0;
+}
+
+.progress-log-title {
+  color: #263238;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.progress-log-detail {
+  margin-top: 3px;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.progress-log-percent {
+  color: #667eea;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+}
+
+@keyframes pulseDot {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.35);
+  }
 }
 
 /* 动画 */

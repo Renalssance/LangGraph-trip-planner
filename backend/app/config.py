@@ -51,9 +51,9 @@ class Settings(BaseSettings):
     langchain_project: str = "trip-planner"
 
     # 智能体配置
-    agent_max_iterations: int = 3
+    agent_max_iterations: int = 2
     agent_temperature: float = 0.7
-    agent_timeout: float = 30.0
+    agent_timeout: float = 90.0
 
     # 日志配置
     log_level: str = "INFO"

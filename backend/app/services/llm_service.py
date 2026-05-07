@@ -30,9 +30,9 @@ def get_llm() -> BaseChatModel:
             api_key=api_key,
             base_url=base_url,
             model=model,
-            temperature=0.7,
+            temperature=settings.agent_temperature,
             max_tokens=2000,
-            timeout=60.0,  # 增加到60秒
+            timeout=settings.agent_timeout,
             max_retries=3
         )
 

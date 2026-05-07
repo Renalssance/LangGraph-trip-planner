@@ -1,0 +1,183 @@
+============================================================
+-> 多agent的智能旅行助手 v1.5.0
+============================================================
+应用名称: 多agent的智能旅行助手
+版本: 1.5.0
+服务器: 0.0.0.0:8000
+高德地图API Key: 已配置
+OpenAI API Key: 已配置
+OpenAI Base URL: https://dashscope.aliyuncs.com/compatible-mode/v1
+OpenAI Model: qwen3.6-plus-2026-04-02
+LangChain 追踪: 禁用
+智能体最大迭代次数: 2
+智能体温度: 0.7
+智能体超时: 90.0秒
+日志级别: INFO
+
+[OK] 配置验证通过
+
+============================================================
+[DOC] API文档: http://localhost:8000/docs
+[DOC] ReDoc文档: http://localhost:8000/redoc
+============================================================
+
+INFO:     Application startup complete.
+INFO:     127.0.0.1:52314 - "OPTIONS /api/trip/plan HTTP/1.1" 200 OK
+2026-05-07 16:21:38,884 - app.api.routes.trip - INFO - 
+============================================================
+2026-05-07 16:21:38,885 - app.api.routes.trip - INFO - 📥 收到旅行规划请求 (LangGraph):
+2026-05-07 16:21:38,885 - app.api.routes.trip - INFO -    城市: 上海市
+2026-05-07 16:21:38,885 - app.api.routes.trip - INFO -    日期: 2026-05-07 - 2026-05-09
+2026-05-07 16:21:38,885 - app.api.routes.trip - INFO -    天数: 3
+2026-05-07 16:21:38,885 - app.api.routes.trip - INFO - ============================================================
+
+2026-05-07 16:21:38,885 - app.api.routes.trip - INFO - 🔄 获取 LangGraph 工作流实例...
+2026-05-07 16:21:38,887 - app.workflows.trip_planner_graph - INFO - 🔄 初始化 LangGraph 旅行规划工作流...
+2026-05-07 16:21:38,887 - app.tools.amap_mcp_tools - INFO - 首次加载高德地图工具，建立缓存...
+2026-05-07 16:21:38,890 - app.tools.amap_mcp_tools - INFO - 正在连接高德地图MCP服务器...
+Processing request of type ListToolsRequest
+2026-05-07 16:21:41,281 - app.tools.amap_mcp_tools - INFO - ✅ 从MCP服务器加载了 16 个工具
+2026-05-07 16:21:41,293 - app.tools.amap_mcp_tools - INFO - 包装后工具数量: 16
+2026-05-07 16:21:41,293 - app.workflows.trip_planner_graph - INFO - ✅ 加载了 16 个工具
+2026-05-07 16:21:41,293 - app.workflows.trip_planner_graph - INFO - 创建智能体...
+   创建景点搜索智能体...
+[SUCCESS] LangChain LLM 初始化成功
+   模型: qwen3.6-plus-2026-04-02
+   Base URL: https://dashscope.aliyuncs.com/compatible-mode/v1
+   [OK] 景点搜索智能体创建成功，工具数量: 16
+2026-05-07 16:21:41,425 - app.agents.langgraph_agents - INFO - [OK] 景点搜索智能体创建成功
+   创建天气查询智能体...
+   [OK] 天气查询智能体创建成功，工具数量: 16
+2026-05-07 16:21:41,427 - app.agents.langgraph_agents - INFO - [OK] 天气查询智能体创建成功
+2026-05-07 16:21:41,429 - app.agents.langgraph_agents - INFO - [OK] 酒店推荐智能体创建成功
+2026-05-07 16:21:41,430 - app.agents.langgraph_agents - INFO - [OK] 行程规划智能体创建成功
+2026-05-07 16:21:41,430 - app.workflows.trip_planner_graph - INFO - 构建 StateGraph...
+2026-05-07 16:21:41,436 - app.workflows.trip_planner_graph - INFO - ✅ LangGraph 工作流初始化成功
+2026-05-07 16:21:41,436 - app.api.routes.trip - INFO - 🚀 开始执行工作流...
+2026-05-07 16:21:41,436 - app.workflows.trip_planner_graph - INFO - 
+============================================================
+2026-05-07 16:21:41,436 - app.workflows.trip_planner_graph - INFO - 🚀 开始 LangGraph 旅行规划工作流...
+2026-05-07 16:21:41,436 - app.workflows.trip_planner_graph - INFO - 目的地: 上海市
+2026-05-07 16:21:41,436 - app.workflows.trip_planner_graph - INFO - ============================================================
+
+2026-05-07 16:21:41,438 - app.workflows.trip_planner_graph - INFO - 📚 检索旅行知识...
+2026-05-07 16:21:41,439 - app.workflows.trip_planner_graph - INFO - 📍 搜索景点...
+2026-05-07 16:21:44,493 - httpx - INFO - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+Processing request of type ListToolsRequest
+2026-05-07 16:21:55,247 - httpx - INFO - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+⠙ Resolving dependencies...                                                                       
+⠙ Resolving dependencies...                                                                       
+⠙ amap-mcp-server==0.1.11                                                                         ⠋ Resolving dependencies...                                                                       
+⠙ pydantic==2.13.4                                                                                ⠋ Resolving dependencies...                                                                       
+⠋ Resolving dependencies...                                                                       
+⠙ requests==2.33.1                                                                                
+⠙ pydantic==2.13.4                                                                                
+⠙ anyio==4.13.0                                                                                   
+⠙ pydantic==2.13.4                                                                                
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+2026-05-07 16:22:19,642 - httpx - INFO - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-07 16:22:19,645 - app.workflows.trip_planner_graph - INFO - 🌤️  查询天气...
+2026-05-07 16:22:22,719 - httpx - INFO - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+Processing request of type ListToolsRequest
+2026-05-07 16:22:31,399 - httpx - INFO - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-07 16:22:31,403 - app.workflows.trip_planner_graph - INFO - 🏨 搜索酒店...
+2026-05-07 16:22:35,816 - httpx - INFO - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+Processing request of type ListToolsRequest
+2026-05-07 16:22:45,536 - httpx - INFO - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+⠙ Resolving dependencies...                                                                       
+⠙ amap-mcp-server==0.1.11                                                                         
+⠙ Resolving dependencies...                                                                       
+⠙ requests==2.33.1                                                                                
+⠙ httpx==0.28.1                                                                                   ⠋ Resolving dependencies...                                                                       
+⠙ pydantic==2.13.4                                                                                
+⠙ requests==2.33.1                                                                                
+⠙ anyio==4.13.0                                                                                   
+⠙ mcp==1.8.1                                                                                      
+⠙ pydantic-settings==2.14.0                                                                       
+⠙ certifi==2026.4.22                                                                              
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+2026-05-07 16:22:56,283 - httpx - INFO - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+⠙ amap-mcp-server==0.1.11                                                                         
+⠙ anyio==4.13.0                                                                                   
+⠙ pydantic==2.13.4                                                                                
+⠙ certifi==2026.4.22                                                                              
+⠙ pydantic==2.13.4                                                                                
+⠙ pydantic==2.13.4                                                                                
+⠙ pydantic==2.13.4                                                                                
+⠙ starlette==1.0.0                                                                                
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+Processing request of type ListToolsRequest
+2026-05-07 16:23:24,863 - httpx - INFO - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-07 16:23:24,868 - app.workflows.trip_planner_graph - INFO - 📋 生成行程计划...
+2026-05-07 16:24:31,632 - httpx - INFO - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-07 16:24:31,637 - app.workflows.trip_planner_graph - INFO - 🧪 评估行程质量...
+2026-05-07 16:24:31,638 - app.workflows.trip_planner_graph - INFO - 
+============================================================
+2026-05-07 16:24:31,638 - app.workflows.trip_planner_graph - INFO - ✅ 旅行计划生成完成!
+2026-05-07 16:24:31,638 - app.workflows.trip_planner_graph - INFO - ============================================================
+
+2026-05-07 16:24:31,638 - app.api.routes.trip - INFO - ✅ 旅行计划生成成功,准备返回响应
+
+INFO:     127.0.0.1:52314 - "POST /api/trip/plan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52314 - "GET /api/poi/photo?name=%E5%A4%96%E6%BB%A9 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52512 - "GET /api/poi/photo?name=%E5%8D%97%E4%BA%AC%E4%B8%9C%E8%B7%AF%E6%AD%A5%E8%A1%8C%E8%A1%97 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52513 - "GET /api/poi/photo?name=%E4%B8%9C%E6%96%B9%E6%98%8E%E7%8F%A0%E5%B9%BF%E6%92%AD%E7%94%B5%E8%A7%86%E5%A1%94 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52514 - "GET /api/poi/photo?name=%E4%B8%8A%E6%B5%B7%E8%BF%AA%E5%A3%AB%E5%B0%BC%E4%B9%90%E5%9B%AD HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52515 - "GET /api/poi/photo?name=%E8%BF%AA%E5%A3%AB%E5%B0%BC%E5%B0%8F%E9%95%87 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52516 - "GET /api/poi/photo?name=%E4%B8%8A%E6%B5%B7%E6%9C%B1%E5%AE%B6%E8%A7%92%E5%8F%A4%E9%95%87%E6%97%85%E6%B8%B8%E5%8C%BA HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52314 - "GET /api/poi/photo?name=%E8%B1%AB%E5%9B%AD%E5%95%86%E5%9F%8E HTTP/1.1" 200 OK
