@@ -14,7 +14,12 @@ from ..agents.langgraph_agents import (
     create_hotel_agent,
     create_planner_agent
 )
+from ..agents.evaluator_agent import evaluate_plan
+from ..agents.reviser_agent import revise_plan
+from ..evals import should_revise_plan
 from ..tools.amap_mcp_tools import get_cached_amap_tools
+from ..rag import TravelKnowledgeRetriever
+from ..skills import estimate_budget, extract_json, generate_trip_report
 from ..models.schemas import (
     TripRequest, TripPlan, DayPlan, Attraction, Meal, WeatherInfo,
     Location, Hotel, Budget
@@ -47,6 +52,7 @@ class TripPlannerWorkflow:
             self.weather_agent = create_weather_agent(self.tools)
             self.hotel_agent = create_hotel_agent(self.tools)
             self.planner_agent = create_planner_agent([])  # 行程规划不需要外部工具
+            self.knowledge_retriever = TravelKnowledgeRetriever()
 
             # 构建工作流图
             logger.info("构建 StateGraph...")
@@ -126,19 +132,28 @@ class TripPlannerWorkflow:
         """构建 StateGraph"""
         workflow = StateGraph(TripPlannerState)
         # 添加节点
+        workflow.add_node("retrieve_knowledge", self._retrieve_knowledge)
         workflow.add_node("search_attractions", self._search_attractions)
         workflow.add_node("check_weather", self._check_weather)
         workflow.add_node("find_hotels", self._find_hotels)
         workflow.add_node("plan_itinerary", self._plan_itinerary)
+        workflow.add_node("evaluate_plan", self._evaluate_plan)
+        workflow.add_node("revise_plan", self._revise_plan)
         workflow.add_node("handle_error", self._handle_error)
         # 设置入口点
-        workflow.set_entry_point("search_attractions")
+        workflow.set_entry_point("retrieve_knowledge")
         # 添加边（正常流程）
-        workflow.add_edge("search_attractions", "check_weather")
-        workflow.add_edge("check_weather", "find_hotels")
-        workflow.add_edge("find_hotels", "plan_itinerary")
-        workflow.add_edge("plan_itinerary", END)
+        workflow.add_edge("plan_itinerary", "evaluate_plan")
         # 添加错误处理边
+        workflow.add_conditional_edges(
+            "retrieve_knowledge",
+            self._check_error,
+            {
+                "continue": "search_attractions",
+                "error": "handle_error"
+            }
+        )
+
         workflow.add_conditional_edges(
             "search_attractions",
             self._check_error,
@@ -166,9 +181,40 @@ class TripPlannerWorkflow:
             }
         )
 
+        workflow.add_conditional_edges(
+            "evaluate_plan",
+            self._should_revise,
+            {
+                "revise": "revise_plan",
+                "finish": END,
+            }
+        )
+        workflow.add_edge("revise_plan", "evaluate_plan")
         workflow.add_edge("handle_error", END)
 
         return workflow.compile()
+
+    def _retrieve_knowledge(self, state: TripPlannerState) -> Dict[str, Any]:
+        """检索目的地知识和用户偏好上下文节点"""
+        logger.info("📚 检索旅行知识...")
+        try:
+            context = self.knowledge_retriever.retrieve_for_request(state["request"])
+            doc_count = (
+                len(context["retrieved_city_docs"])
+                + len(context["retrieved_attraction_docs"])
+                + len(context["user_profile_context"].get("retrieved_docs", []))
+            )
+            return {
+                **context,
+                "current_step": "knowledge_retrieved",
+                "messages": [{"role": "assistant", "content": f"已检索 {doc_count} 条旅行知识"}],
+            }
+        except Exception as e:
+            logger.error(f"旅行知识检索失败: {str(e)}", exc_info=True)
+            return {
+                "error": f"旅行知识检索失败: {str(e)}",
+                "current_step": "error",
+            }
 
     def _search_attractions(self, state: TripPlannerState) -> Dict[str, Any]:
         """搜索景点节点"""
@@ -176,6 +222,9 @@ class TripPlannerWorkflow:
         try:
             # 构建查询
             query = self._build_attraction_query(state["request"])
+            if state.get("retrieved_attraction_docs"):
+                docs = self._format_knowledge_docs(state["retrieved_attraction_docs"])
+                query += f"\n\n可参考的景点知识:\n{docs}"
 
             # 执行智能体
             result = self.attraction_agent.invoke(
@@ -258,7 +307,10 @@ class TripPlannerWorkflow:
                 state["request"],
                 state["attractions"],
                 state["weather_info"],
-                state["hotels"]
+                state["hotels"],
+                state.get("retrieved_city_docs", []),
+                state.get("retrieved_attraction_docs", []),
+                state.get("user_profile_context", {})
             )
 
             result = self.planner_agent.invoke(
@@ -267,9 +319,13 @@ class TripPlannerWorkflow:
 
             output = self._extract_agent_output(result)
             trip_plan = self._parse_trip_plan(output, state["request"])
+            trip_plan = self._apply_plan_skills(trip_plan, state["request"])
+            report = generate_trip_report(trip_plan)
 
             return {
+                "draft_plan": trip_plan,
                 "trip_plan": trip_plan,
+                "final_report": report,
                 "current_step": "plan_completed",
                 "messages": [{"role": "assistant", "content": "行程计划生成完成！"}]
             }
@@ -288,9 +344,12 @@ class TripPlannerWorkflow:
 
         # 创建备用计划
         fallback_plan = self._create_fallback_plan(state["request"])
+        report = generate_trip_report(fallback_plan)
 
         return {
             "trip_plan": fallback_plan,
+            "draft_plan": fallback_plan,
+            "final_report": report,
             "current_step": "error_handled",
             "messages": [{"role": "assistant", "content": f"遇到错误，已生成备用计划: {error_msg}"}]
         }
@@ -298,6 +357,72 @@ class TripPlannerWorkflow:
     def _check_error(self, state: TripPlannerState) -> str:
         """检查是否有错误"""
         return "error" if state.get("error") else "continue"
+
+    def _evaluate_plan(self, state: TripPlannerState) -> Dict[str, Any]:
+        """评估当前行程计划节点"""
+        logger.info("🧪 评估行程质量...")
+        try:
+            plan = state.get("trip_plan") or state.get("draft_plan")
+            if not plan:
+                return {
+                    "error": "评估失败: 缺少行程计划",
+                    "current_step": "error",
+                }
+
+            evaluation_result = evaluate_plan(plan, state["request"])
+            return {
+                "evaluation_result": evaluation_result,
+                "current_step": "plan_evaluated",
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": f"行程评估完成，得分 {evaluation_result['total_score']}",
+                    }
+                ],
+            }
+        except Exception as e:
+            logger.error(f"行程评估失败: {str(e)}", exc_info=True)
+            return {
+                "error": f"行程评估失败: {str(e)}",
+                "current_step": "error",
+            }
+
+    def _revise_plan(self, state: TripPlannerState) -> Dict[str, Any]:
+        """根据评估结果修正行程计划节点"""
+        logger.info("🛠️  修正行程计划...")
+        try:
+            plan = state.get("trip_plan") or state.get("draft_plan")
+            if not plan:
+                return {
+                    "error": "修正失败: 缺少行程计划",
+                    "current_step": "error",
+                }
+
+            revised_plan = revise_plan(plan, state["request"], state.get("evaluation_result", {}))
+            report = generate_trip_report(revised_plan)
+            revision_count = state.get("revision_count", 0) + 1
+            return {
+                "trip_plan": revised_plan,
+                "draft_plan": revised_plan,
+                "final_report": report,
+                "revision_count": revision_count,
+                "current_step": "plan_revised",
+                "messages": [{"role": "assistant", "content": f"已完成第 {revision_count} 轮行程修正"}],
+            }
+        except Exception as e:
+            logger.error(f"行程修正失败: {str(e)}", exc_info=True)
+            return {
+                "error": f"行程修正失败: {str(e)}",
+                "current_step": "error",
+            }
+
+    def _should_revise(self, state: TripPlannerState) -> str:
+        """根据评估结果和修正次数决定是否继续修正。"""
+        if state.get("error"):
+            return "finish"
+        if should_revise_plan(state.get("evaluation_result", {}), state.get("revision_count", 0)):
+            return "revise"
+        return "finish"
 
     # ============ 辅助方法（从原 trip_planner_agent.py 迁移）============
 
@@ -310,9 +435,20 @@ class TripPlannerWorkflow:
 
         return f"请搜索{request.city}的{keywords}相关景点"
 
-    def _build_planner_query(self, request: TripRequest, attractions: List[Attraction],
-                            weather: List[WeatherInfo], hotels: List[Hotel]) -> str:
+    def _build_planner_query(
+        self,
+        request: TripRequest,
+        attractions: List[Attraction],
+        weather: List[WeatherInfo],
+        hotels: List[Hotel],
+        city_docs: List[Dict[str, Any]] | None = None,
+        attraction_docs: List[Dict[str, Any]] | None = None,
+        user_profile_context: Dict[str, Any] | None = None,
+    ) -> str:
         """构建行程规划查询"""
+        city_context = self._format_knowledge_docs(city_docs or [])
+        attraction_context = self._format_knowledge_docs(attraction_docs or [])
+        preference_context = self._format_user_profile_context(user_profile_context or {})
         query = f"""请根据以下信息生成{request.city}的{request.travel_days}天旅行计划:
 
 **基本信息:**
@@ -332,6 +468,15 @@ class TripPlannerWorkflow:
 **酒店信息:**
 已找到 {len(hotels)} 个酒店，包括：{', '.join([h.name for h in hotels[:2]]) if hotels else '无'}
 
+**RAG检索到的城市和通用旅行知识:**
+{city_context or '无'}
+
+**RAG检索到的景点知识:**
+{attraction_context or '无'}
+
+**用户偏好上下文:**
+{preference_context or '无'}
+
 **要求:**
 1. 每天安排2-3个景点
 2. 每天必须包含早中晚三餐
@@ -345,31 +490,39 @@ class TripPlannerWorkflow:
 
         return query
 
+    def _format_knowledge_docs(self, docs: List[Dict[str, Any]]) -> str:
+        """格式化 RAG 文档，作为 agent 输入上下文。"""
+        lines = []
+        for index, doc in enumerate(docs[:6], start=1):
+            title = doc.get("title", "未命名知识")
+            content = doc.get("content", "")
+            tags = ", ".join(doc.get("tags", []))
+            suffix = f" 标签: {tags}" if tags else ""
+            lines.append(f"{index}. {title}: {content}{suffix}")
+        return "\n".join(lines)
+
+    def _format_user_profile_context(self, context: Dict[str, Any]) -> str:
+        """格式化用户偏好和历史偏好知识。"""
+        parts = []
+        preferences = context.get("preferences") or []
+        if preferences:
+            parts.append(f"显式偏好: {', '.join(preferences)}")
+        if context.get("free_text_input"):
+            parts.append(f"补充要求: {context['free_text_input']}")
+        docs = context.get("retrieved_docs") or []
+        if docs:
+            parts.append("偏好知识:\n" + self._format_knowledge_docs(docs))
+        return "\n".join(parts)
+
     def _extract_json(self, response: str) -> str:
         """从响应文本中提取JSON字符串"""
-        # 查找JSON代码块
-        if "```json" in response:
-            json_start = response.find("```json") + 7
-            json_end = response.find("```", json_start)
-            json_str = response[json_start:json_end].strip()
-        elif "```" in response:
-            json_start = response.find("```") + 3
-            json_end = response.find("```", json_start)
-            json_str = response[json_start:json_end].strip()
-        elif "[" in response and "]" in response:
-            # 处理JSON数组
-            json_start = response.find("[")
-            json_end = response.rfind("]") + 1
-            json_str = response[json_start:json_end]
-        elif "{" in response and "}" in response:
-            # 直接查找JSON对象
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            json_str = response[json_start:json_end]
-        else:
-            # 如果没有找到JSON，返回原始响应
-            json_str = response.strip()
-        return json_str
+        return extract_json(response)
+
+    def _apply_plan_skills(self, trip_plan: TripPlan, request: TripRequest) -> TripPlan:
+        """应用可复用 Skills 补强行程结构。"""
+        if not trip_plan.budget or trip_plan.budget.total <= 0:
+            trip_plan.budget = estimate_budget(trip_plan, request)
+        return trip_plan
 
     def _parse_attractions(self, response: str) -> List[Attraction]:
         """解析景点信息"""
@@ -565,7 +718,7 @@ class TripPlannerWorkflow:
             )
             days.append(day_plan)
 
-        return TripPlan(
+        fallback_plan = TripPlan(
             city=request.city,
             start_date=request.start_date,
             end_date=request.end_date,
@@ -573,6 +726,7 @@ class TripPlannerWorkflow:
             weather_info=[],
             overall_suggestions=f"这是为您规划的{request.city}{request.travel_days}日游行程,建议提前查看各景点的开放时间。"
         )
+        return self._apply_plan_skills(fallback_plan, request)
 
     def plan_trip(self, request: TripRequest) -> TripPlan:
         """执行旅行规划工作流"""

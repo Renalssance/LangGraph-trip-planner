@@ -19,7 +19,9 @@
       "Bash(source:*)",
       "Bash(python:*)",
       "Bash(pip install:*)",
-      "Bash(timeout 5 netstat:*)"
+      "Bash(timeout 5 netstat:*)",
+      "Bash(python3 -m py_compile backend/app/workflows/trip_planner_graph.py backend/app/agents/langgraph_agents.py backend/app/tools/amap_mcp_tools.py backend/app/api/routes/trip.py backend/app/config.py backend/app/services/llm_service.py)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

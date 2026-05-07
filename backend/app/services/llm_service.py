@@ -4,6 +4,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.language_models.chat_models import BaseChatModel
 import os
 from typing import Optional
+from ..config import get_settings
 
 # 全局 LLM 实例
 _llm_instance: Optional[BaseChatModel] = None
@@ -14,10 +15,11 @@ def get_llm() -> BaseChatModel:
     global _llm_instance
 
     if _llm_instance is None:
+        settings = get_settings()
         # 从环境变量读取配置
-        api_key = os.getenv("OPENAI_API_KEY", "")
-        base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-        model = os.getenv("OPENAI_MODEL", "gpt-4")
+        api_key = os.getenv("OPENAI_API_KEY", settings.openai_api_key)
+        base_url = os.getenv("OPENAI_BASE_URL", settings.openai_base_url)
+        model = os.getenv("OPENAI_MODEL", settings.openai_model)
 
         # 验证必要的配置
         if not api_key:
@@ -45,4 +47,3 @@ def reset_llm():
     """重置 LLM 实例（用于测试或重新配置）"""
     global _llm_instance
     _llm_instance = None
-

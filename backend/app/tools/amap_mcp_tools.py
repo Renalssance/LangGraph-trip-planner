@@ -2,8 +2,8 @@
 
 from typing import List, Dict, Any, Optional, Type
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import logging
-import nest_asyncio
 import inspect
 import json
 try:
@@ -18,6 +18,18 @@ from ..config import get_settings
 
 # 设置日志记录
 logger = logging.getLogger(__name__)
+
+
+def _run_async(coro):
+    """Run a coroutine, using a thread if an event loop is already running."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(lambda: asyncio.run(coro))
+        return future.result()
 
 
 def wrap_async_tools(tools: List[BaseTool]) -> List[BaseTool]:
@@ -48,24 +60,15 @@ def wrap_async_tools(tools: List[BaseTool]) -> List[BaseTool]:
             class SyncWrapper(tool.__class__):
                 def _run(self, *args, **kwargs):
                     """同步运行方法，内部调用异步方法"""
-                    import asyncio
                     # 确保 kwargs 中有 config 参数
                     if 'config' not in kwargs:
                         kwargs['config'] = None
                     try:
-                        # 使用 nest_asyncio 允许在已有事件循环中运行
-                        nest_asyncio.apply()
-                        return asyncio.run(self._arun(*args, **kwargs))
+                        return _run_async(self._arun(*args, **kwargs))
                     except RuntimeError as e:
                         if "cannot be called from a running event loop" in str(e):
-                            # 如果已经有运行中的事件循环，尝试使用当前循环
-                            loop = asyncio.get_event_loop()
-                            if loop.is_running():
-                                # 在已有循环中运行
-                                future = asyncio.run_coroutine_threadsafe(
-                                    self._arun(*args, **kwargs), loop
-                                )
-                                return future.result()
+                            # 已有事件循环时改用线程运行
+                            return _run_async(self._arun(*args, **kwargs))
                         raise
 
             # 创建包装器实例，复制所有属性
@@ -164,9 +167,7 @@ async def create_amap_mcp_tools() -> List[BaseTool]:
 def get_amap_mcp_tools() -> List[BaseTool]:
     """同步获取MCP工具"""
     try:
-        # 应用 nest_asyncio 以允许在已有事件循环中运行
-        nest_asyncio.apply()
-        return asyncio.run(create_amap_mcp_tools())
+        return _run_async(create_amap_mcp_tools())
     except Exception as e:
         logger.error(f"❌ 同步获取MCP工具失败: {str(e)}", exc_info=True)
         return []
@@ -214,8 +215,7 @@ def get_amap_essential_tools() -> List[BaseTool]:
 
             return filtered_tools
 
-        nest_asyncio.apply()
-        tools = asyncio.run(load_and_filter())
+        tools = _run_async(load_and_filter())
         logger.info(f"✅ 加载了 {len(tools)} 个主要高德地图工具")
 
         # 包装异步工具以支持同步调用

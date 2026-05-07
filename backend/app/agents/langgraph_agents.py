@@ -148,6 +148,8 @@ def create_attraction_search_agent(tools: List[BaseTool]):
 
         # 格式化系统提示词，包含工具信息
         tools_description = "\n".join([f"- {tool.name}: {tool.description}" for tool in tools])
+        
+        # 不需要再在prompt中重复工具调用要求了，已经在create agent时说明了工具调用的要求
         system_prompt = ATTRACTION_AGENT_PROMPT.format(tools=tools_description)
 
         # 创建智能体图

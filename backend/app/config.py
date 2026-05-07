@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 from typing import List
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
@@ -21,7 +22,7 @@ class Settings(BaseSettings):
 
     # 应用基本配置
     app_name: str = "多agent的智能旅行助手"
-    app_version: str = "1.0.0"
+    app_version: str = "1.5.0"
     debug: bool = False
 
     # 服务器配置
@@ -40,8 +41,8 @@ class Settings(BaseSettings):
 
     # LLM配置 (从环境变量读取,由HelloAgents管理)
     openai_api_key: str = ""
-    openai_base_url: str = "https://api.openai.com/v1"
-    openai_model: str = "gpt-4"
+    openai_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    openai_model: str = "qwen3.6-plus-2026-04-02"
 
     # LangChain 配置
     langchain_tracing: bool = False  # 是否启用 LangSmith 追踪
@@ -56,6 +57,18 @@ class Settings(BaseSettings):
 
     # 日志配置
     log_level: str = "INFO"
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_debug(cls, value):
+        """Allow environment names such as release/prod for DEBUG."""
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"release", "prod", "production", "false", "0", "off", "no"}:
+                return False
+            if normalized in {"debug", "dev", "development", "true", "1", "on", "yes"}:
+                return True
+        return value
 
     class Config:
         env_file = ".env"
@@ -86,7 +99,7 @@ def validate_config():
         errors.append("AMAP_API_KEY未配置")
 
     # LangChain 使用标准 OpenAI 环境变量
-    openai_api_key = os.getenv("OPENAI_API_KEY")
+    openai_api_key = os.getenv("OPENAI_API_KEY", settings.openai_api_key)
     if not openai_api_key:
         errors.append("OPENAI_API_KEY 未配置（LangChain 必需）")
 
@@ -115,7 +128,7 @@ def print_config():
     print(f"高德地图API Key: {'已配置' if settings.amap_api_key else '未配置'}")
 
     # 检查LLM配置
-    openai_api_key = os.getenv("OPENAI_API_KEY")
+    openai_api_key = os.getenv("OPENAI_API_KEY", settings.openai_api_key)
     openai_base_url = os.getenv("OPENAI_BASE_URL", settings.openai_base_url)
     openai_model = os.getenv("OPENAI_MODEL", settings.openai_model)
 
@@ -127,4 +140,3 @@ def print_config():
     print(f"智能体温度: {settings.agent_temperature}")
     print(f"智能体超时: {settings.agent_timeout}秒")
     print(f"日志级别: {settings.log_level}")
-

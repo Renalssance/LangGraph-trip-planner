@@ -22,9 +22,16 @@ class TripPlannerState(TypedDict):
     user_input: str
 
     # 中间结果
+    retrieved_city_docs: List[Dict[str, Any]]
+    retrieved_attraction_docs: List[Dict[str, Any]]
+    user_profile_context: Dict[str, Any]
     attractions: List[Attraction]
     weather_info: List[WeatherInfo]
     hotels: List[Hotel]
+    draft_plan: Optional[TripPlan]
+    evaluation_result: Dict[str, Any]
+    revision_count: int
+    final_report: str
 
     # 智能体通信
     messages: Annotated[List[Dict], add_messages]
@@ -41,11 +48,18 @@ def create_initial_state(request: TripRequest, user_input: str = "") -> TripPlan
     return {
         "request": request,
         "user_input": user_input,
+        "retrieved_city_docs": [],
+        "retrieved_attraction_docs": [],
+        "user_profile_context": {},
         "attractions": [],
         "weather_info": [],
         "hotels": [],
+        "draft_plan": None,
         "messages": [],
         "trip_plan": None,
+        "evaluation_result": {},
+        "revision_count": 0,
+        "final_report": "",
         "error": None,
         "current_step": "started"
     }

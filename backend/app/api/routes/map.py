@@ -153,7 +153,7 @@ async def health_check():
         return {
             "status": "healthy",
             "service": "map-service",
-            "mcp_tools_count": len(service.mcp_tool._available_tools)
+            "mcp_tools_count": len(service.tools) if hasattr(service, 'tools') else 0
         }
     except Exception as e:
         raise HTTPException(
