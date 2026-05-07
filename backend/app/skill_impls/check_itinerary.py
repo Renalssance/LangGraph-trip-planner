@@ -3,7 +3,7 @@
 from math import asin, cos, radians, sin, sqrt
 from typing import Any, Dict, List
 
-from ...models.schemas import TripPlan, TripRequest, WeatherInfo
+from ..models.schemas import TripPlan, TripRequest, WeatherInfo
 
 
 def check_itinerary(plan: TripPlan, request: TripRequest) -> Dict[str, Any]:

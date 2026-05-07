@@ -2,7 +2,7 @@
 
 from typing import Dict
 
-from ...models.schemas import Budget, TripPlan, TripRequest
+from ..models.schemas import Budget, TripPlan, TripRequest
 
 
 BUDGET_MULTIPLIERS = {

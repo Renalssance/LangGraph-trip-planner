@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List
 
-from ...models.schemas import TripPlan, TripRequest
+from ..models.schemas import TripPlan, TripRequest
 
 
 def match_preferences(plan: TripPlan, request: TripRequest) -> Dict[str, Any]:

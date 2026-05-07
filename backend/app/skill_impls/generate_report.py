@@ -1,6 +1,6 @@
 """Report generation skill."""
 
-from ...models.schemas import TripPlan
+from ..models.schemas import TripPlan
 
 
 def generate_trip_report(plan: TripPlan) -> str:

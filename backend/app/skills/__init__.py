@@ -1,10 +1,18 @@
-"""Reusable task skills for the travel planning workflow."""
+"""Reusable task skills for the travel planning workflow.
 
-from .budget_estimation.estimate_budget import estimate_budget
-from .itinerary_check.check_itinerary import check_itinerary
-from .json_repair.repair_json import extract_json, repair_and_validate_json
-from .preference_matching.match_preferences import match_preferences
-from .report_generation.generate_report import generate_trip_report
+The directories in this package are Codex skill bundles and must use
+hyphenated names. Importable Python implementations live in
+``app.skill_impls`` because Python packages cannot contain hyphens.
+"""
+
+from ..skill_impls import (
+    check_itinerary,
+    estimate_budget,
+    extract_json,
+    generate_trip_report,
+    match_preferences,
+    repair_and_validate_json,
+)
 
 __all__ = [
     "estimate_budget",
