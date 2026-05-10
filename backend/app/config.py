@@ -8,8 +8,12 @@ from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
 # 加载环境变量
-# 首先尝试加载当前目录的.env
-load_dotenv()
+# 显式加载 backend/.env,避免从仓库根目录启动时找不到配置
+backend_env = Path(__file__).resolve().parent.parent / ".env"
+if backend_env.exists():
+    load_dotenv(backend_env, override=False)
+else:
+    load_dotenv()
 
 # 然后尝试加载HelloAgents的.env(如果存在)
 helloagents_env = Path(__file__).parent.parent.parent.parent / "HelloAgents" / ".env"
@@ -39,10 +43,11 @@ class Settings(BaseSettings):
     unsplash_access_key: str = ""
     unsplash_secret_key: str = ""
 
-    # LLM配置 (从环境变量读取,由HelloAgents管理)
-    openai_api_key: str = ""
-    openai_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    openai_model: str = "qwen3.6-plus-2026-04-02"
+    # LLM配置 (优先读取 LLM_* 环境变量,兼容旧 OPENAI_* 变量)
+    llm_api_key: str = ""
+    llm_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    llm_model_id: str = "qwen3.6-plus-2026-04-02"
+    llm_timeout: float = 60.0
 
     # LangChain 配置
     langchain_tracing: bool = False  # 是否启用 LangSmith 追踪
@@ -89,6 +94,15 @@ def get_settings() -> Settings:
     return settings
 
 
+def get_llm_config():
+    """获取LLM配置,兼容历史 OPENAI_* 环境变量。"""
+    api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or settings.llm_api_key
+    base_url = os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL") or settings.llm_base_url
+    model = os.getenv("LLM_MODEL_ID") or os.getenv("OPENAI_MODEL") or settings.llm_model_id
+    timeout = os.getenv("LLM_TIMEOUT") or settings.llm_timeout
+    return api_key, base_url, model, float(timeout)
+
+
 # 验证必要的配置
 def validate_config():
     """验证配置是否完整"""
@@ -98,10 +112,10 @@ def validate_config():
     if not settings.amap_api_key:
         errors.append("AMAP_API_KEY未配置")
 
-    # LangChain 使用标准 OpenAI 环境变量
-    openai_api_key = os.getenv("OPENAI_API_KEY", settings.openai_api_key)
-    if not openai_api_key:
-        errors.append("OPENAI_API_KEY 未配置（LangChain 必需）")
+    # LangChain 使用 OpenAI 兼容接口,配置名统一为 LLM_*
+    llm_api_key, _, _, _ = get_llm_config()
+    if not llm_api_key:
+        errors.append("LLM_API_KEY 未配置（LLM 必需）")
 
     # LangChain 配置检查
     if settings.langchain_tracing and not settings.langchain_api_key:
@@ -128,13 +142,12 @@ def print_config():
     print(f"高德地图API Key: {'已配置' if settings.amap_api_key else '未配置'}")
 
     # 检查LLM配置
-    openai_api_key = os.getenv("OPENAI_API_KEY", settings.openai_api_key)
-    openai_base_url = os.getenv("OPENAI_BASE_URL", settings.openai_base_url)
-    openai_model = os.getenv("OPENAI_MODEL", settings.openai_model)
+    llm_api_key, llm_base_url, llm_model_id, llm_timeout = get_llm_config()
 
-    print(f"OpenAI API Key: {'已配置' if openai_api_key else '未配置'}")
-    print(f"OpenAI Base URL: {openai_base_url}")
-    print(f"OpenAI Model: {openai_model}")
+    print(f"LLM API Key: {'已配置' if llm_api_key else '未配置'}")
+    print(f"LLM Base URL: {llm_base_url}")
+    print(f"LLM Model: {llm_model_id}")
+    print(f"LLM 超时: {llm_timeout}秒")
     print(f"LangChain 追踪: {'启用' if settings.langchain_tracing else '禁用'}")
     print(f"智能体最大迭代次数: {settings.agent_max_iterations}")
     print(f"智能体温度: {settings.agent_temperature}")

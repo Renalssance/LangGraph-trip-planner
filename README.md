@@ -149,13 +149,14 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-编辑 `backend/.env`，当前代码实际读取这些 OpenAI 兼容变量：
+编辑 `backend/.env`，当前代码实际读取这些 LLM 变量：
 
 ```env
 AMAP_API_KEY=your-amap-web-service-key
-OPENAI_API_KEY=your-openai-compatible-api-key
-OPENAI_BASE_URL=https://your-compatible-endpoint/v1
-OPENAI_MODEL=your-model-name
+LLM_API_KEY=your-openai-compatible-api-key
+LLM_BASE_URL=https://your-compatible-endpoint/v1
+LLM_MODEL_ID=your-model-name
+LLM_TIMEOUT=60
 UNSPLASH_ACCESS_KEY=your-unsplash-access-key
 UNSPLASH_SECRET_KEY=your-unsplash-secret-key
 HOST=0.0.0.0

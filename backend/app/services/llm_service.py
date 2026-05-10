@@ -2,9 +2,8 @@
 
 from langchain_openai import ChatOpenAI
 from langchain_core.language_models.chat_models import BaseChatModel
-import os
 from typing import Optional
-from ..config import get_settings
+from ..config import get_llm_config, get_settings
 
 # 全局 LLM 实例
 _llm_instance: Optional[BaseChatModel] = None
@@ -16,14 +15,12 @@ def get_llm() -> BaseChatModel:
 
     if _llm_instance is None:
         settings = get_settings()
-        # 从环境变量读取配置
-        api_key = os.getenv("OPENAI_API_KEY", settings.openai_api_key)
-        base_url = os.getenv("OPENAI_BASE_URL", settings.openai_base_url)
-        model = os.getenv("OPENAI_MODEL", settings.openai_model)
+        # 从环境变量读取 LLM 配置
+        api_key, base_url, model, timeout = get_llm_config()
 
         # 验证必要的配置
         if not api_key:
-            raise ValueError("OPENAI_API_KEY 未配置（LangChain 必需）")
+            raise ValueError("LLM_API_KEY 未配置（LLM 必需）")
 
         # 创建 ChatOpenAI 实例
         _llm_instance = ChatOpenAI(
@@ -32,7 +29,7 @@ def get_llm() -> BaseChatModel:
             model=model,
             temperature=settings.agent_temperature,
             max_tokens=2000,
-            timeout=settings.agent_timeout,
+            timeout=timeout,
             max_retries=3
         )
 
