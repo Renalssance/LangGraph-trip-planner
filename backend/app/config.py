@@ -47,7 +47,11 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     llm_model_id: str = "qwen3.6-plus-2026-04-02"
-    llm_timeout: float = 60.0
+    llm_timeout: float = 90.0
+    llm_thinking_mode: str = "preserve"
+    llm_log_responses: bool = False
+    llm_log_response_max_chars: int = 6000
+    llm_log_dir: str = "logs/llm"
 
     # LangChain 配置
     langchain_tracing: bool = False  # 是否启用 LangSmith 追踪

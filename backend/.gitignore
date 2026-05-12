@@ -40,6 +40,7 @@ ENV/
 
 # 日志
 *.log
+logs/
 
 # 测试
 .pytest_cache/

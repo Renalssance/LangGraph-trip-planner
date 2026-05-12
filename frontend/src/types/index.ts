@@ -72,6 +72,7 @@ export interface TripPlan {
   end_date: string
   days: DayPlan[]
   weather_info: WeatherInfo[]
+  weather_error?: string | null
   overall_suggestions: string
   budget?: Budget
 }
@@ -94,7 +95,7 @@ export interface TripPlanResponse {
 }
 
 export type TripProgressEventType = 'progress' | 'complete' | 'error'
-export type TripProgressStatus = 'active' | 'done' | 'error'
+export type TripProgressStatus = 'active' | 'done' | 'warning' | 'error'
 
 export interface TripProgressEvent {
   event: TripProgressEventType

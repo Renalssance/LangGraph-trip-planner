@@ -11,7 +11,6 @@ from langchain_core.messages import HumanMessage
 from .trip_planner_state import TripPlannerState, create_initial_state, has_error
 from ..agents.langgraph_agents import (
     create_attraction_search_agent,
-    create_weather_agent,
     create_hotel_agent,
     create_planner_agent
 )
@@ -75,8 +74,8 @@ PROGRESS_NODE_META = {
     },
     "handle_error": {
         "step": "handle_error",
-        "title": "生成备用计划",
-        "detail": "主流程遇到问题，正在生成可返回的备用行程",
+        "title": "规划终止",
+        "detail": "主流程遇到错误，规划已终止",
         "percent": 92,
     },
 }
@@ -102,8 +101,9 @@ class TripPlannerWorkflow:
 
             # 创建智能体
             logger.info("创建智能体...")
-            self.attraction_agent = create_attraction_search_agent(self.tools)
-            self.weather_agent = create_weather_agent(self.tools)
+            self.attraction_agent = create_attraction_search_agent(
+                self._get_attraction_agent_tools()
+            )
             self.hotel_agent = create_hotel_agent(self.tools)
             self.planner_agent = create_planner_agent([])  # 行程规划不需要外部工具
             self.knowledge_retriever = TravelKnowledgeRetriever()
@@ -168,6 +168,12 @@ class TripPlannerWorkflow:
                         if isinstance(content, dict):
                             import json
                             content = json.dumps(content, ensure_ascii=False)
+                        if not content and hasattr(msg, "additional_kwargs"):
+                            reasoning_content = msg.additional_kwargs.get(
+                                "reasoning_content"
+                            )
+                            if reasoning_content:
+                                return str(reasoning_content)
                         return str(content)
             # 如果没有找到 assistant 消息，返回空字符串
             return ""
@@ -193,18 +199,15 @@ class TripPlannerWorkflow:
         workflow.add_node("plan_itinerary", self._plan_itinerary)
         workflow.add_node("evaluate_plan", self._evaluate_plan)
         workflow.add_node("revise_plan", self._revise_plan)
-        workflow.add_node("handle_error", self._handle_error)
         # 设置入口点
         workflow.set_entry_point("retrieve_knowledge")
-        # 添加边（正常流程）
-        workflow.add_edge("plan_itinerary", "evaluate_plan")
         # 添加错误处理边
         workflow.add_conditional_edges(
             "retrieve_knowledge",
             self._check_error,
             {
                 "continue": "search_attractions",
-                "error": "handle_error"
+                "error": END
             }
         )
 
@@ -213,7 +216,7 @@ class TripPlannerWorkflow:
             self._check_error,
             {
                 "continue": "check_weather",
-                "error": "handle_error"
+                "error": END
             }
         )
 
@@ -222,7 +225,7 @@ class TripPlannerWorkflow:
             self._check_error,
             {
                 "continue": "find_hotels",
-                "error": "handle_error"
+                "error": END
             }
         )
 
@@ -231,7 +234,16 @@ class TripPlannerWorkflow:
             self._check_error,
             {
                 "continue": "plan_itinerary",
-                "error": "handle_error"
+                "error": END
+            }
+        )
+
+        workflow.add_conditional_edges(
+            "plan_itinerary",
+            self._check_error,
+            {
+                "continue": "evaluate_plan",
+                "error": END
             }
         )
 
@@ -244,7 +256,6 @@ class TripPlannerWorkflow:
             }
         )
         workflow.add_edge("revise_plan", "evaluate_plan")
-        workflow.add_edge("handle_error", END)
 
         return workflow.compile()
 
@@ -279,17 +290,38 @@ class TripPlannerWorkflow:
                 docs = self._format_knowledge_docs(state["retrieved_attraction_docs"])
                 query += f"\n\n可参考的景点知识:\n{docs}"
 
-            result = self.attraction_agent.invoke(
-                self._prepare_agent_input(query, [])
+            max_attractions = self._max_attraction_search_results(state["request"])
+            query += self._build_attraction_agent_limits(state["request"], max_attractions)
+
+            result = self._invoke_limited_attraction_agent(
+                query,
+                state["request"].city,
+                max_attractions,
             )
-            output = self._extract_agent_output(result)
+            output = self._limit_tool_json_items(
+                self._extract_agent_output(result),
+                max_items=max_attractions,
+                preferred_keys=("attractions", "pois", "data", "results"),
+            )
             attractions = self._parse_attractions(output, state["request"].city)
             if not attractions:
-                logger.error("景点搜索未解析到可用结果，停止当前工作流并进入备用计划")
+                tool_output = self._extract_last_tool_output(result)
+                if tool_output:
+                    attractions = self._parse_attractions(
+                        self._limit_tool_json_items(
+                            tool_output,
+                            max_items=max_attractions,
+                            preferred_keys=("attractions", "pois", "data", "results"),
+                        ),
+                        state["request"].city,
+                    )
+            attractions = attractions[:max_attractions]
+            if not attractions:
+                logger.error("景点搜索未解析到可用结果，停止当前工作流")
                 return {
                     "error": "景点搜索未解析到可用结果",
                     "current_step": "error",
-                    "messages": [{"role": "assistant", "content": "景点搜索结果为空，已触发备用计划"}],
+                    "messages": [{"role": "assistant", "content": "景点搜索结果为空，规划已终止"}],
                 }
 
             return {
@@ -305,30 +337,139 @@ class TripPlannerWorkflow:
                 "current_step": "error"
             }
 
+    def _max_attraction_search_results(self, request: TripRequest) -> int:
+        """Keep POI collection bounded so the search node cannot loop forever."""
+        return max(6, min(12, request.travel_days * 3 + 2))
+
+    def _attraction_agent_recursion_limit(self) -> int:
+        """Bound the create_agent tool loop while leaving room for retries."""
+        return 10
+
+    def _get_attraction_agent_tools(self) -> List[Any]:
+        """Expose only text search to the attraction agent to prevent detail loops."""
+        search_tools = [
+            tool
+            for tool in self.tools
+            if any(name in tool.name.lower() for name in ["maps_text_search", "text_search"])
+        ]
+        if not search_tools:
+            raise ValueError("未找到 maps_text_search 文本搜索工具，无法创建景点 agent")
+        return search_tools
+
+    def _build_attraction_agent_limits(self, request: TripRequest, max_attractions: int) -> str:
+        preferences = ", ".join(request.preferences) if request.preferences else "无明确偏好"
+        return f"""
+
+**景点筛选和停止规则:**
+1. 必须使用 maps_text_search 获取候选景点，然后判断每个候选是否符合用户偏好: {preferences}
+2. 只返回符合偏好的景点；如果偏好结果不足，可以补充该城市代表性景点
+3. 最多返回 {max_attractions} 个景点；一旦已有 {max_attractions} 个可用景点，必须结束并输出JSON数组
+4. 最多发起3次搜索；不要为了补齐 description、ticket_price、visit_duration 等缺失字段继续调用工具
+5. 缺失字段用空字符串、null或0补齐，最终只输出JSON数组
+"""
+
+    def _invoke_limited_attraction_agent(
+        self,
+        query: str,
+        city: str,
+        max_attractions: int,
+    ) -> dict:
+        """Run the attraction agent with a hard recursion cap and early stop."""
+        agent_input = self._prepare_agent_input(query, [])
+        config = {"recursion_limit": self._attraction_agent_recursion_limit()}
+        last_result: dict = {}
+
+        try:
+            for chunk in self.attraction_agent.stream(
+                agent_input,
+                config=config,
+                stream_mode="values",
+            ):
+                if not isinstance(chunk, dict):
+                    continue
+                last_result = chunk
+                output = self._extract_agent_output(chunk)
+                if not output:
+                    continue
+                limited_output = self._limit_tool_json_items(
+                    output,
+                    max_items=max_attractions,
+                    preferred_keys=("attractions", "pois", "data", "results"),
+                )
+                attractions = self._parse_attractions(limited_output, city)
+                if len(attractions) >= max_attractions:
+                    logger.info("景点 agent 已达到结果上限 %s，提前结束", max_attractions)
+                    break
+        except Exception as exc:
+            if not last_result:
+                raise
+            logger.warning("景点 agent 达到循环上限或提前中止，使用已产生结果继续解析: %s", exc)
+
+        if not last_result:
+            raise RuntimeError("景点 agent 未产生任何结果")
+        return last_result
+
+    def _extract_last_tool_output(self, result: dict) -> str:
+        """Return the latest tool message content from an agent result."""
+        messages = result.get("messages", []) if isinstance(result, dict) else []
+        for msg in reversed(messages):
+            content = ""
+            msg_type = getattr(msg, "type", None) or getattr(msg, "role", None)
+            if isinstance(msg, dict):
+                msg_type = msg.get("type") or msg.get("role")
+                content = msg.get("content", "")
+            elif hasattr(msg, "content"):
+                content = msg.content
+            if msg_type == "tool" and content:
+                return self._stringify_tool_result(content)
+        return ""
+
+    def _limit_tool_json_items(
+        self,
+        response: str,
+        max_items: int,
+        preferred_keys: tuple[str, ...],
+    ) -> str:
+        """Trim large tool payloads before parsers trigger expensive geocoding."""
+        try:
+            json_str = self._extract_json(response)
+            data = json.loads(json_str)
+            items = self._coerce_items(data, *preferred_keys)
+            if not items or len(items) <= max_items:
+                return response
+            return json.dumps(items[:max_items], ensure_ascii=False)
+        except Exception:
+            return response
+
     def _check_weather(self, state: TripPlannerState) -> Dict[str, Any]:
         """查询天气节点"""
         logger.info("🌤️  查询天气...")
         try:
-            query = f"查询{state['request'].city}的天气信息"
+            tool = self._get_tool("maps_weather") or self._get_tool("weather")
+            if not tool:
+                raise ValueError("未找到 maps_weather 天气工具")
 
-            result = self.weather_agent.invoke(
-                self._prepare_agent_input(query, [])
-            )
-
-            output = self._extract_agent_output(result)
+            result = tool.invoke({"city": state["request"].city})
+            output = self._stringify_tool_result(result)
             weather_info = self._parse_weather(output)
+            if not weather_info:
+                raise ValueError("天气工具未返回可解析的天气数据")
 
             return {
                 "weather_info": weather_info,
+                "weather_error": None,
                 "current_step": "weather_checked",
                 "messages": [{"role": "assistant", "content": f"已获取 {len(weather_info)} 天天气信息"}]
             }
 
         except Exception as e:
             logger.error(f"天气查询失败: {str(e)}", exc_info=True)
+            weather_error = f"天气未获取到: {str(e)}"
             return {
-                "error": f"天气查询失败: {str(e)}",
-                "current_step": "error"
+                "weather_info": [],
+                "weather_error": weather_error,
+                "current_step": "weather_unavailable",
+                "messages": [{"role": "assistant", "content": weather_error}]
             }
 
     def _find_hotels(self, state: TripPlannerState) -> Dict[str, Any]:
@@ -368,6 +509,7 @@ class TripPlannerWorkflow:
                 state["attractions"],
                 state["weather_info"],
                 state["hotels"],
+                state.get("weather_error"),
                 state.get("retrieved_city_docs", []),
                 state.get("retrieved_attraction_docs", []),
                 state.get("user_profile_context", {})
@@ -379,6 +521,9 @@ class TripPlannerWorkflow:
 
             output = self._extract_agent_output(result)
             trip_plan = self._parse_trip_plan(output, state["request"])
+            if not trip_plan.days:
+                raise ValueError("行程计划解析结果为空，未生成任何每日行程")
+            trip_plan = self._apply_weather_status(trip_plan, state.get("weather_error"))
             trip_plan = self._apply_plan_skills(trip_plan, state["request"])
             report = generate_trip_report(trip_plan)
 
@@ -396,23 +541,6 @@ class TripPlannerWorkflow:
                 "error": f"行程规划失败: {str(e)}",
                 "current_step": "error"
             }
-
-    def _handle_error(self, state: TripPlannerState) -> Dict[str, Any]:
-        """错误处理节点"""
-        error_msg = state.get('error', '未知错误')
-        logger.warning(f"⚠️  处理错误: {error_msg}")
-
-        # 创建备用计划
-        fallback_plan = self._create_fallback_plan(state["request"])
-        report = generate_trip_report(fallback_plan)
-
-        return {
-            "trip_plan": fallback_plan,
-            "draft_plan": fallback_plan,
-            "final_report": report,
-            "current_step": "error_handled",
-            "messages": [{"role": "assistant", "content": f"遇到错误，已生成备用计划: {error_msg}"}]
-        }
 
     def _check_error(self, state: TripPlannerState) -> str:
         """检查是否有错误"""
@@ -555,6 +683,7 @@ class TripPlannerWorkflow:
         attractions: List[Attraction],
         weather: List[WeatherInfo],
         hotels: List[Hotel],
+        weather_error: str | None = None,
         city_docs: List[Dict[str, Any]] | None = None,
         attraction_docs: List[Dict[str, Any]] | None = None,
         user_profile_context: Dict[str, Any] | None = None,
@@ -563,6 +692,12 @@ class TripPlannerWorkflow:
         city_context = self._format_knowledge_docs(city_docs or [])
         attraction_context = self._format_knowledge_docs(attraction_docs or [])
         preference_context = self._format_user_profile_context(user_profile_context or {})
+        weather_context = (
+            f"已获取 {len(weather)} 天天气预报"
+            if weather
+            else f"{weather_error or '天气未获取到'}。请不要编造天气数据，并在 overall_suggestions 中明确提醒用户出行前自行确认天气。"
+        )
+
         query = f"""请根据以下信息生成{request.city}的{request.travel_days}天旅行计划:
 
 **基本信息:**
@@ -577,7 +712,7 @@ class TripPlannerWorkflow:
 已找到 {len(attractions)} 个景点，包括：{', '.join([a.name for a in attractions[:3]]) if attractions else '无'}
 
 **天气信息:**
-{len(weather)} 天天气预报
+{weather_context}
 
 **酒店信息:**
 已找到 {len(hotels)} 个酒店，包括：{', '.join([h.name for h in hotels[:2]]) if hotels else '无'}
@@ -598,6 +733,7 @@ class TripPlannerWorkflow:
 4. 考虑景点之间的距离和交通方式
 5. 返回完整的JSON格式数据
 6. 景点的经纬度坐标要真实准确
+7. 如果天气未获取到，weather_info 必须返回空数组，并在 overall_suggestions 中说明“天气未获取到，建议出行前查看实时天气”
 """
         if request.free_text_input:
             query += f"\n**额外要求:** {request.free_text_input}"
@@ -789,6 +925,19 @@ class TripPlannerWorkflow:
             trip_plan.budget = estimate_budget(trip_plan, request)
         return trip_plan
 
+    def _apply_weather_status(self, trip_plan: TripPlan, weather_error: str | None) -> TripPlan:
+        """Mark the final plan when weather is unavailable without failing the trip."""
+        if not weather_error:
+            return trip_plan
+
+        trip_plan.weather_info = []
+        trip_plan.weather_error = weather_error
+        notice = f"{weather_error}，建议出行前查看实时天气。"
+        if notice not in trip_plan.overall_suggestions:
+            separator = " " if trip_plan.overall_suggestions else ""
+            trip_plan.overall_suggestions = f"{trip_plan.overall_suggestions}{separator}{notice}"
+        return trip_plan
+
     def _parse_attractions(self, response: str, city: str | None = None) -> List[Attraction]:
         """解析景点信息"""
         try:
@@ -845,9 +994,19 @@ class TripPlannerWorkflow:
             data = json.loads(json_str)
 
             weather_info = []
+            weather_items = []
             for item in self._coerce_items(data, "weather_info", "lives", "forecasts"):
+                if isinstance(item.get("casts"), list):
+                    weather_items.extend(cast for cast in item["casts"] if isinstance(cast, dict))
+                else:
+                    weather_items.append(item)
+
+            for item in weather_items:
                 try:
                     date_value = item.get("date") or str(item.get("reporttime", ""))[:10]
+                    if not date_value:
+                        logger.warning("跳过缺少日期的天气条目: %s", item)
+                        continue
                     weather = WeatherInfo(
                         date=date_value,
                         day_weather=item.get("day_weather") or item.get("dayweather") or item.get("weather", ""),
@@ -911,6 +1070,7 @@ class TripPlannerWorkflow:
                 end_date=data.get("end_date", request.end_date),
                 days=[],
                 weather_info=[],
+                weather_error=data.get("weather_error"),
                 overall_suggestions=data.get("overall_suggestions", ""),
                 budget=None
             )
@@ -1027,8 +1187,9 @@ class TripPlannerWorkflow:
             return trip_plan
         except Exception as e:
             logger.error(f"解析行程计划失败: {str(e)}")
-            # 返回备用计划
-            return self._create_fallback_plan(request)
+            logger.error(f"原始行程响应长度: {len(response)}")
+            logger.error(f"原始行程响应前1000字符: {response[:1000]}")
+            raise ValueError(f"行程计划解析失败: {str(e)}") from e
 
     def _create_fallback_plan(self, request: TripRequest) -> TripPlan:
         """创建备用计划(当Agent失败时)"""
@@ -1075,6 +1236,7 @@ class TripPlannerWorkflow:
             end_date=request.end_date,
             days=days,
             weather_info=[],
+            weather_error=None,
             overall_suggestions=f"这是为您规划的{request.city}{request.travel_days}日游行程,建议提前查看各景点的开放时间。"
         )
         return self._apply_plan_skills(fallback_plan, request)
@@ -1093,8 +1255,12 @@ class TripPlannerWorkflow:
         final_state = self.graph.invoke(initial_state)
 
         # 检查结果
-        if final_state.get("error") and not final_state.get("trip_plan"):
+        if final_state.get("error"):
             error_msg = final_state.get("error", "未知错误")
+            logger.error(f"❌ 旅行规划失败: {error_msg}")
+            raise Exception(error_msg)
+        if not final_state.get("trip_plan"):
+            error_msg = "旅行规划未生成有效行程"
             logger.error(f"❌ 旅行规划失败: {error_msg}")
             raise Exception(error_msg)
 
@@ -1140,16 +1306,31 @@ class TripPlannerWorkflow:
                 last_percent = event_percent
                 yield event
 
-        if final_state.get("error") and not final_state.get("trip_plan"):
+        if final_state.get("error"):
             error_msg = final_state.get("error", "未知错误")
             logger.error(f"❌ 旅行规划失败: {error_msg}")
             yield {
                 "event": "error",
                 "step": "error",
                 "title": "旅行规划失败",
-                "detail": error_msg,
+                "detail": f"遇到错误，规划终止，请重新生成。错误原因: {error_msg}",
                 "percent": min(last_percent, 99),
                 "status": "error",
+                "message": f"遇到错误，规划终止，请重新生成。错误原因: {error_msg}",
+            }
+            return
+
+        if not final_state.get("trip_plan"):
+            error_msg = "旅行规划未生成有效行程"
+            logger.error(f"❌ 旅行规划失败: {error_msg}")
+            yield {
+                "event": "error",
+                "step": "error",
+                "title": "旅行规划失败",
+                "detail": f"遇到错误，规划终止，请重新生成。错误原因: {error_msg}",
+                "percent": min(last_percent, 99),
+                "status": "error",
+                "message": f"遇到错误，规划终止，请重新生成。错误原因: {error_msg}",
             }
             return
 
@@ -1186,6 +1367,8 @@ class TripPlannerWorkflow:
         )
         detail = self._progress_detail(node_name, update, state) or meta["detail"]
         status = "error" if isinstance(update, dict) and update.get("error") else "done"
+        if isinstance(update, dict) and update.get("weather_error"):
+            status = "warning"
         return {
             "event": "progress",
             "step": meta["step"],
@@ -1201,6 +1384,8 @@ class TripPlannerWorkflow:
             return ""
         if update.get("error"):
             return str(update["error"])
+        if update.get("weather_error"):
+            return str(update["weather_error"])
 
         message = self._latest_message_content(update)
         if message:

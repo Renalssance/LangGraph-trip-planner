@@ -181,6 +181,15 @@
           </a-button>
         </a-form-item>
 
+        <a-form-item v-if="generationError">
+          <a-alert
+            type="error"
+            show-icon
+            message="规划终止"
+            :description="generationError"
+          />
+        </a-form-item>
+
         <!-- 加载进度条 -->
         <a-form-item v-if="loading">
           <div class="loading-container">
@@ -230,6 +239,7 @@ const router = useRouter()
 const loading = ref(false)
 const loadingProgress = ref(0)
 const loadingStatus = ref('')
+const generationError = ref('')
 const progressLogs = ref<ProgressLogItem[]>([])
 
 type TripFormState = Omit<TripFormData, 'start_date' | 'end_date'> & {
@@ -281,6 +291,7 @@ const handleSubmit = async () => {
   loading.value = true
   loadingProgress.value = 0
   loadingStatus.value = '收到旅行规划请求...'
+  generationError.value = ''
   progressLogs.value = []
 
   try {
@@ -313,8 +324,12 @@ const handleSubmit = async () => {
       message.error(response.message || '生成失败')
     }
   } catch (error: any) {
-    loadingStatus.value = error.message || '生成旅行计划失败'
-    message.error(error.message || '生成旅行计划失败,请稍后重试')
+    const errorMessage = error.message || '遇到错误，规划终止，请重新生成。'
+    generationError.value = errorMessage.includes('规划终止')
+      ? errorMessage
+      : `遇到错误，规划终止，请重新生成。错误原因: ${errorMessage}`
+    loadingStatus.value = generationError.value
+    message.error(generationError.value)
   } finally {
     setTimeout(() => {
       loading.value = false
@@ -692,6 +707,11 @@ const handleProgressEvent = (event: TripProgressEvent) => {
 .progress-log-item-done .progress-log-dot {
   background: #52c41a;
   box-shadow: 0 0 0 4px rgba(82, 196, 26, 0.12);
+}
+
+.progress-log-item-warning .progress-log-dot {
+  background: #faad14;
+  box-shadow: 0 0 0 4px rgba(250, 173, 20, 0.12);
 }
 
 .progress-log-item-error .progress-log-dot {

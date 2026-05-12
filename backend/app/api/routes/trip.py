@@ -66,7 +66,7 @@ async def plan_trip(request: TripRequest):
         logger.error(f"❌ 生成旅行计划失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"生成旅行计划失败: {str(e)}"
+            detail=f"遇到错误，规划终止，请重新生成。错误原因: {str(e)}"
         )
 
 
@@ -110,14 +110,15 @@ async def plan_trip_stream(request: TripRequest):
 
         except Exception as e:
             logger.error(f"❌ 流式生成旅行计划失败: {str(e)}", exc_info=True)
+            error_message = f"遇到错误，规划终止，请重新生成。错误原因: {str(e)}"
             yield _sse_event({
                 "event": "error",
                 "step": "error",
                 "title": "旅行规划失败",
-                "detail": str(e),
+                "detail": error_message,
                 "percent": 100,
                 "status": "error",
-                "message": f"生成旅行计划失败: {str(e)}",
+                "message": error_message,
             })
 
     return StreamingResponse(

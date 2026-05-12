@@ -27,6 +27,7 @@ class TripPlannerState(TypedDict):
     user_profile_context: Dict[str, Any]
     attractions: List[Attraction]
     weather_info: List[WeatherInfo]
+    weather_error: Optional[str]
     hotels: List[Hotel]
     draft_plan: Optional[TripPlan]
     evaluation_result: Dict[str, Any]
@@ -53,6 +54,7 @@ def create_initial_state(request: TripRequest, user_input: str = "") -> TripPlan
         "user_profile_context": {},
         "attractions": [],
         "weather_info": [],
+        "weather_error": None,
         "hotels": [],
         "draft_plan": None,
         "messages": [],

@@ -23,8 +23,10 @@ ATTRACTION_AGENT_PROMPT = """你是景点搜索专家。你的任务是根据城
 1. 根据用户查询选择合适的工具
 2. 提供完整的参数
 3. 不要在没有工具的情况下直接回答
-4. 工具调用完成后，请直接返回工具返回的原始JSON数据，不要进行总结或格式化
-5. 返回的JSON应该是一个景点列表，每个景点包含name、address、location、visit_duration、description、category、ticket_price等字段
+4. 最多调用3次搜索工具，不要重复使用完全相同的关键词
+5. 工具调用完成后，必须立即返回JSON数组，不要继续搜索、不要进行总结
+6. 返回的JSON应该是一个景点列表，每个景点包含name、address、location、visit_duration、description、category、ticket_price等字段
+7. 如果工具没有返回visit_duration、description、ticket_price等字段，请使用空字符串、null或0补齐，不要为了补齐字段继续调用工具
 """
 
 WEATHER_AGENT_PROMPT = """你是天气查询专家。你的任务是查询指定城市的天气信息。

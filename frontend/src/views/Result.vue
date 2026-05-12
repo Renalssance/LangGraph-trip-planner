@@ -54,7 +54,7 @@
                 第{{ day.day_index + 1 }}天
               </a-menu-item>
             </a-sub-menu>
-            <a-menu-item key="weather" v-if="tripPlan.weather_info && tripPlan.weather_info.length > 0">
+            <a-menu-item key="weather" v-if="(tripPlan.weather_info && tripPlan.weather_info.length > 0) || tripPlan.weather_error">
               <span>🌤️ 天气信息</span>
             </a-menu-item>
           </a-menu>
@@ -284,6 +284,14 @@
             </a-list-item>
           </template>
         </a-list>
+        </a-card>
+        <a-card id="weather" v-else-if="tripPlan.weather_error" title="天气信息" style="margin-top: 20px" :bordered="false">
+          <a-alert
+            type="warning"
+            show-icon
+            :message="tripPlan.weather_error"
+            description="行程已继续生成。建议出行前查看实时天气，并根据降雨、温度和风力调整户外安排。"
+          />
         </a-card>
       </div>
     </div>
@@ -789,8 +797,24 @@ const exportAsPDF = async () => {
 // 初始化地图
 const initMap = async () => {
   try {
+    const amapJsKey = import.meta.env.VITE_AMAP_WEB_JS_KEY
+    const amapSecurityJsCode = import.meta.env.VITE_AMAP_SECURITY_JS_CODE
+
+    if (!amapJsKey) {
+      message.error('地图加载失败: 未配置高德 JS API Key')
+      return
+    }
+
+    if (amapSecurityJsCode) {
+      window._AMapSecurityConfig = {
+        securityJsCode: amapSecurityJsCode
+      }
+    } else {
+      console.warn('未配置 VITE_AMAP_SECURITY_JS_CODE, 新申请的高德 JS API Key 可能无法加载底图')
+    }
+
     const AMap = await AMapLoader.load({
-      key: import.meta.env.VITE_AMAP_WEB_JS_KEY,  // 高德地图Web端(JS API) Key
+      key: amapJsKey,  // 高德地图Web端(JS API) Key
       version: '2.0',
       plugins: ['AMap.Marker', 'AMap.Polyline', 'AMap.InfoWindow']
     })
